@@ -75,7 +75,7 @@ models_info = {
 # Descargar YAMLs de SAM 2.1
 print("\n📝 Descargando configuraciones YAML (SAM 2.1)...")
 for filename, url in yaml_configs_2_1.items():
-    filepath = Path("configs") / filename
+    filepath = Path("configs") / "sam2.1" / filename
     if filepath.exists():
         print(f"⏭️  {filename} ya existe")
         continue
