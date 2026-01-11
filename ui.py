@@ -293,7 +293,6 @@ def create_interface():
                     choices=["Foreground", "Background"],
                     value="Foreground",
                     label="🎯 Tipo de Punto",
-                    info="Selecciona el tipo de punto antes de hacer click en la imagen"
                 )
                 
                 input_image = gr.Image(
@@ -390,7 +389,7 @@ def create_interface():
         def handle_image_click(evt: gr.SelectData, original_image, point_type_value, current_coords, current_labels):
             """Maneja los clicks en la imagen para agregar puntos"""
             if original_image is None:
-                return original_image, current_coords, current_labels
+                return original_image, current_coords, current_labels, original_image  # Mantener original sin puntos
             
             # Obtener coordenadas del click
             x, y = evt.index[0], evt.index[1]
@@ -399,12 +398,18 @@ def create_interface():
             label = 1 if point_type_value == "Foreground" else 0
             
             # Agregar punto a las listas
+            # Asegurarse de que current_coords y current_labels sean listas
+            if current_coords is None:
+                current_coords = []
+            if current_labels is None:
+                current_labels = []
+            
             new_coords = current_coords + [[x, y]]
             new_labels = current_labels + [label]
             
-            # Dibujar puntos sobre la imagen original
+            # Dibujar puntos sobre una COPIA de la imagen original (NO modificar la original)
             from PIL import ImageDraw
-            img_with_points = original_image.copy()
+            img_with_points = original_image.copy()  # Copia para mostrar, NO modifica original_image
             draw = ImageDraw.Draw(img_with_points)
             
             # Dibujar todos los puntos
@@ -418,15 +423,16 @@ def create_interface():
                     width=2
                 )
             
-            return img_with_points, new_coords, new_labels
+            # Devolver: imagen con puntos para mostrar, nuevas coordenadas, nuevas labels, y la imagen ORIGINAL sin modificar
+            return img_with_points, new_coords, new_labels, original_image
         
         # Función para limpiar puntos
         def clear_points(original_image, current_coords, current_labels):
             """Limpia todos los puntos seleccionados"""
             if original_image is None:
-                return original_image, [], []
-            # Devolver imagen original sin puntos
-            return original_image, [], []
+                return original_image, [], [], original_image
+            # Devolver imagen original sin puntos (mantener original_image_state intacto)
+            return original_image, [], [], original_image
         
         # Función para mostrar imagen con puntos (sin segmentar)
         def show_image_with_points(original_image, coords, labels):
@@ -457,14 +463,21 @@ def create_interface():
         # Segmentar imagen
         def segment_and_store(original_image, model_name, points_per_side, pred_iou_thresh, stability_score_thresh, point_coords, point_labels):
             """Segmenta y almacena los resultados en el estado"""
+            # Si hay puntos, se usarán automáticamente. Si no hay puntos, será segmentación automática.
+            # La función segment_image ya maneja esto internamente
+            
             # Usar la imagen original sin puntos para la segmentación
             result_image, status, masks, image_np, mask_info_list = segment_image_wrapper(
                 original_image, model_name, points_per_side, pred_iou_thresh, stability_score_thresh, point_coords, point_labels
             )
             
-            # No seleccionar ninguna en el checkbox por defecto
-            # Pero la imagen inicial muestra todas las máscaras (result_image ya las tiene)
-            selected_value = []
+            # Si hay máscaras, seleccionar la primera (mejor) por defecto
+            # Si es segmentación con puntos, habrá 3 máscaras, seleccionar la mejor (primera)
+            if mask_info_list and len(mask_info_list) > 0:
+                # Seleccionar la primera máscara (la mejor) por defecto
+                selected_value = [mask_info_list[0]]
+            else:
+                selected_value = []
             
             # Actualizar el CheckboxGroup con nuevas opciones y valores
             # En Gradio, para actualizar choices y value, usamos gr.update()
@@ -480,6 +493,7 @@ def create_interface():
             )
         
         # Guardar imagen original cuando se sube (solo cuando cambia, no en cada actualización)
+        # Usar upload en lugar de change para evitar que se ejecute cuando se actualiza la imagen con puntos
         def on_image_upload(image):
             """Se ejecuta cuando se sube una nueva imagen"""
             if image is not None:
@@ -487,7 +501,8 @@ def create_interface():
                 return image, [], []  # original_image_state, point_coords_state, point_labels_state
             return None, [], []
         
-        input_image.change(
+        # Usar upload en lugar de change para que solo se ejecute cuando se sube una imagen nueva
+        input_image.upload(
             fn=on_image_upload,
             inputs=[input_image],
             outputs=[original_image_state, point_coords_state, point_labels_state]
@@ -497,14 +512,14 @@ def create_interface():
         input_image.select(
             fn=handle_image_click,
             inputs=[original_image_state, point_type, point_coords_state, point_labels_state],
-            outputs=[input_image, point_coords_state, point_labels_state]
+            outputs=[input_image, point_coords_state, point_labels_state, original_image_state]
         )
         
         # Evento para limpiar puntos
         clear_points_btn.click(
             fn=clear_points,
             inputs=[original_image_state, point_coords_state, point_labels_state],
-            outputs=[input_image, point_coords_state, point_labels_state]
+            outputs=[input_image, point_coords_state, point_labels_state, original_image_state]
         )
         
         # Actualizar imagen cuando cambian los puntos (para mostrar puntos sin segmentar)
@@ -533,6 +548,7 @@ def create_interface():
             """Actualiza la visualización cuando cambia la selección de máscaras"""
             if masks is None or image_np is None:
                 return None
+            # Mostrar puntos solo si fueron usados en la segmentación (si existen)
             return update_visualization(masks, image_np, selected_masks, point_coords, point_labels)
         
         mask_checkboxes.change(

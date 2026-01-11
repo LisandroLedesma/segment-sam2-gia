@@ -92,13 +92,17 @@ def visualize_masks(image, masks, selected_indices=None, point_coords=None, poin
     # Superponer máscaras directamente sobre la imagen (mucho más rápido que matplotlib)
     for idx, mask_data in enumerate(masks_to_show):
         mask = mask_data['segmentation']
+        
+        # Asegurarse de que la máscara sea booleana para usarla como índice
+        if mask.dtype != bool:
+            mask = mask.astype(bool)
+        
         original_idx = mask_indices_to_show[idx]
         color = all_colors[original_idx]
         
         # Crear máscara con transparencia
         # Mezclar color con imagen original usando alpha blending
         alpha = 0.5
-        mask_3d = mask[:, :, np.newaxis]
         
         # Aplicar color solo donde está la máscara
         result[mask] = result[mask] * (1 - alpha) + color * alpha

@@ -101,24 +101,43 @@ def segment_image_with_points(image, model_name, point_coords, point_labels):
         print(f"[segment_image_with_points] máscaras generadas: {len(masks)}")
         
         # Convertir máscaras al formato esperado
-        # Seleccionar la máscara con mejor score
-        best_mask_idx = np.argmax(scores)
-        best_mask = masks[best_mask_idx]
+        # SAM2 devuelve 3 máscaras candidatas, guardar las 3
+        # Ordenar por score (de mejor a peor)
+        sorted_indices = np.argsort(scores)[::-1]
         
-        # Crear estructura de máscara compatible con el resto del código
-        mask_data = {
-            'segmentation': best_mask,
-            'area': int(np.sum(best_mask)),
-            'bbox': [0, 0, image_np.shape[1], image_np.shape[0]],  # Bounding box aproximado
-            'stability_score': float(scores[best_mask_idx]),
-            'predicted_iou': float(scores[best_mask_idx])
-        }
-        masks_list = [mask_data]
+        masks_list = []
+        for idx in sorted_indices:
+            mask = masks[idx]
+            
+            # Asegurarse de que la máscara sea booleana
+            if mask.dtype != bool:
+                mask = mask.astype(bool)
+            
+            # Calcular bounding box
+            rows = np.any(mask, axis=1)
+            cols = np.any(mask, axis=0)
+            if np.any(rows) and np.any(cols):
+                y_min, y_max = np.where(rows)[0][[0, -1]]
+                x_min, x_max = np.where(cols)[0][[0, -1]]
+                bbox = [float(x_min), float(y_min), float(x_max - x_min), float(y_max - y_min)]
+            else:
+                bbox = [0, 0, 0, 0]
+            
+            mask_data = {
+                'segmentation': mask,
+                'area': int(np.sum(mask)),
+                'bbox': bbox,
+                'stability_score': float(scores[idx]),
+                'predicted_iou': float(scores[idx])
+            }
+            masks_list.append(mask_data)
         
-        # Visualizar máscaras con puntos
+        # Visualizar máscaras con puntos (mostrará solo la mejor por defecto)
         from visualization import visualize_masks
-        result_image = visualize_masks(image_np, masks_list, point_coords=point_coords, point_labels=point_labels)
-        status = f"✅ Segmentación completada: 1 máscara generada (score: {scores[best_mask_idx]:.3f})"
+        # Mostrar solo la mejor máscara inicialmente (índice 0 después de ordenar)
+        result_image = visualize_masks(image_np, masks_list, selected_indices=[0], point_coords=point_coords, point_labels=point_labels)
+        best_score = scores[sorted_indices[0]]
+        status = f"✅ Segmentación completada: 3 máscaras generadas (mejor score: {best_score:.3f})"
         
         print("[segment_image_with_points] OK, devolviendo resultado")
         return result_image, status, masks_list, image_np
@@ -152,7 +171,7 @@ def segment_image(image, model_name, points_per_side, pred_iou_thresh, stability
     
     # Si hay puntos seleccionados, usar segmentación con puntos
     if point_coords and len(point_coords) > 0 and point_labels and len(point_labels) > 0:
-        print("[segment_image] Usando segmentación con puntos")
+        print(f"[segment_image] Usando segmentación con puntos ({len(point_coords)} puntos)")
         return segment_image_with_points(image, model_name, point_coords, point_labels)
     
     # Si no hay puntos, usar segmentación automática
