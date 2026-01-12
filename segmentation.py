@@ -35,6 +35,91 @@ def preprocess_image(image):
     return image_np, image_bgr
 
 
+def segment_single_point(image, model_name, point_coord, point_label=1, mask_index=2):
+    """
+    Segmenta la imagen usando SAM2 con un solo punto de prompt.
+    Devuelve la máscara especificada (1, 2 o 3) de las 3 generadas.
+    
+    Args:
+        image: Imagen a segmentar (PIL Image o numpy array)
+        model_name: Nombre del modelo a usar
+        point_coord: Coordenada del punto [(x, y)]
+        point_label: Etiqueta del punto (1 para foreground, 0 para background)
+        mask_index: Índice de la máscara a devolver (0=primera, 1=segunda, 2=tercera). Por defecto 2 (tercera).
+        
+    Returns:
+        tuple: (máscara, score) o (None, None) si hay error
+    """
+    if image is None:
+        return None, None
+    
+    # Asegurar que el modelo esté cargado
+    success, status = ensure_model_loaded(model_name)
+    if not success:
+        return None, None
+    
+    try:
+        # Preprocesar imagen
+        image_np, image_bgr = preprocess_image(image)
+        
+        # Obtener modelo actual
+        current_model = get_current_model()
+        if current_model is None:
+            return None, None
+        
+        # Crear predictor
+        predictor = SAM2ImagePredictor(current_model)
+        
+        # Configurar la imagen
+        predictor.set_image(image_bgr)
+        
+        # Convertir punto a formato numpy
+        point_coords_np = np.array([point_coord], dtype=np.float32)
+        point_labels_np = np.array([point_label], dtype=np.int32)
+        
+        # Predecir máscaras (devuelve 3 máscaras)
+        masks, scores, logits = predictor.predict(
+            point_coords=point_coords_np,
+            point_labels=point_labels_np,
+            multimask_output=True
+        )
+        
+        # Ordenar por score (de mejor a peor)
+        sorted_indices = np.argsort(scores)[::-1]
+        
+        # Validar y ajustar mask_index (debe estar entre 0 y 2)
+        mask_index = max(0, min(2, int(mask_index)))
+        
+        # Obtener la máscara solicitada (después de ordenar)
+        if len(sorted_indices) > mask_index:
+            selected_idx = sorted_indices[mask_index]  # Máscara seleccionada
+            mask = masks[selected_idx]
+            score = scores[selected_idx]
+            
+            # Asegurarse de que la máscara sea booleana
+            if mask.dtype != bool:
+                mask = mask.astype(bool)
+            
+            return mask, float(score)
+        else:
+            # Si hay menos máscaras de las solicitadas, devolver la última disponible
+            if len(masks) > 0:
+                last_idx = sorted_indices[-1]
+                mask = masks[last_idx]
+                score = scores[last_idx]
+                if mask.dtype != bool:
+                    mask = mask.astype(bool)
+                return mask, float(score)
+        
+        return None, None
+        
+    except Exception as e:
+        print(f"[segment_single_point] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
 def segment_image_with_points(image, model_name, point_coords, point_labels):
     """
     Segmenta la imagen usando SAM2 con puntos de prompt.

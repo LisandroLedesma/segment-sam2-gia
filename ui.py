@@ -240,23 +240,85 @@ def create_interface():
                     outputs=[batch_events['model_info'], batch_events['selected_model_state'], batch_events['process_btn']]
                 )
                 
+                # Cargar imágenes y actualizar componentes
+                upload_outputs = [
+                    batch_events['images_info'], 
+                    batch_events['images_state'], 
+                    batch_events['image_points_state'],
+                    batch_events['original_images_state'],
+                ] + batch_events['image_components'] + [
+                    batch_events['images_container'],
+                    batch_events['points_info']
+                ]
+                
                 batch_events['image_upload'].upload(
                     fn=batch_events['on_images_upload'],
                     inputs=[batch_events['image_upload']],
-                    outputs=[batch_events['images_info'], batch_events['images_state'], batch_events['process_btn']]
+                    outputs=upload_outputs
                 )
                 
-                # Procesar imágenes
-                process_event = batch_events['process_btn'].click(
+                # Conectar eventos de click para cada componente Image
+                for idx, img_component in enumerate(batch_events['image_components']):
+                    click_handler = batch_events['create_image_click_handler'](idx)
+                    click_outputs = [
+                        batch_events['image_points_state'],
+                    ] + batch_events['image_components'] + [
+                        batch_events['points_info']
+                    ]
+                    img_component.select(
+                        fn=click_handler,
+                        inputs=[
+                            batch_events['images_state'],
+                            batch_events['image_points_state'],
+                            batch_events['original_images_state']
+                        ],
+                        outputs=click_outputs
+                    )
+                
+                clear_outputs = [
+                    batch_events['image_points_state'],
+                ] + batch_events['image_components'] + [
+                    batch_events['points_info']
+                ]
+                
+                batch_events['undo_point_btn'].click(
+                    fn=batch_events['undo_last_point_batch'],
+                    inputs=[
+                        batch_events['image_points_state'],
+                        batch_events['images_state'],
+                        batch_events['original_images_state']
+                    ],
+                    outputs=clear_outputs
+                )
+                
+                batch_events['clear_points_btn'].click(
+                    fn=batch_events['clear_all_points'],
+                    inputs=[
+                        batch_events['image_points_state'],
+                        batch_events['images_state'],
+                        batch_events['original_images_state']
+                    ],
+                    outputs=clear_outputs
+                )
+                
+                batch_events['process_btn'].click(
                     fn=batch_events['process_batch_images'],
                     inputs=[
                         batch_events['selected_model_state'],
                         batch_events['images_state'],
+                        batch_events['image_points_state'],
                         batch_events['points_per_side'],
                         batch_events['pred_iou_thresh'],
-                        batch_events['stability_score_thresh']
+                        batch_events['stability_score_thresh'],
+                        batch_events['mask_index']
                     ],
-                    outputs=[batch_events['status'], batch_events['processing_results_state'], batch_events['results_html']]
+                    outputs=[
+                        batch_events['status'], 
+                        batch_events['processing_results_state'], 
+                        batch_events['results_html'],
+                        batch_events['export_files'],
+                        batch_events['export_info']
+                    ]
                 )
                 
                 # Actualizar visualización de resultados cuando cambie el estado

@@ -62,7 +62,25 @@ def visualize_masks(image, masks, selected_indices=None, point_coords=None, poin
         PIL.Image: Imagen con máscaras visualizadas
     """
     if masks is None or len(masks) == 0:
-        # Si no hay máscaras, devolver la imagen original
+        # Si no hay máscaras pero hay puntos, dibujar los puntos
+        if point_coords and point_labels and len(point_coords) > 0:
+            result_image = image.copy()
+            # Convertir a BGR para OpenCV
+            result_bgr = cv2.cvtColor(result_image, cv2.COLOR_RGB2BGR)
+            
+            for coord, label in zip(point_coords, point_labels):
+                x, y = int(coord[0]), int(coord[1])
+                # Foreground: verde, Background: rojo
+                color = (0, 255, 0) if label == 1 else (0, 0, 255)  # BGR: verde o rojo
+                # Dibujar círculo relleno
+                cv2.circle(result_bgr, (x, y), 8, color, -1)
+                # Dibujar borde blanco
+                cv2.circle(result_bgr, (x, y), 8, (255, 255, 255), 2)
+            
+            # Convertir de vuelta a RGB
+            result_image = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(result_image)
+        # Si no hay máscaras ni puntos, devolver la imagen original
         return Image.fromarray(image)
     
     # Ordenar máscaras por área (de mayor a menor) y mantener índices originales
