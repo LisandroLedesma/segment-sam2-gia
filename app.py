@@ -35,7 +35,7 @@ def main():
     
     # Crear y lanzar interfaz
     demo = create_interface()
-    demo.launch(**SERVER_CONFIG)
+    demo.launch(**SERVER_CONFIG, debug=True)
 
 
 if __name__ == "__main__":

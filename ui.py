@@ -12,6 +12,7 @@ from config import MODELS_INFO, DEFAULT_SEGMENTATION_PARAMS
 from models import load_model
 from segmentation import segment_image, preprocess_image
 from visualization import visualize_masks, get_mask_info_list
+from batch_ui import create_batch_interface
 
 
 def segment_image_wrapper(image, model_name, points_per_side, pred_iou_thresh, stability_score_thresh, point_coords=None, point_labels=None):
@@ -214,6 +215,69 @@ def create_interface():
     """
     with gr.Blocks(title="SAM 2.1 - Segmentación de Imágenes", theme=gr.themes.Soft()) as demo:
         
+        # Título principal
+        gr.Markdown(
+            """
+            # 🔬 GIA - Segmentación Automática de Imágenes
+            ### Segment Anything Model 2.1 - Meta AI
+            """
+        )
+        
+        # Tabs para separar funcionalidades
+        with gr.Tabs() as main_tabs:
+            # Tab 1: Segmentación Individual
+            with gr.Tab("🖼️ Segmentación Individual", id="single"):
+                single_tab_content = create_single_segmentation_interface()
+            
+            # Tab 2: Procesamiento por Lotes
+            with gr.Tab("📦 Procesamiento por Lotes", id="batch"):
+                batch_content, batch_events = create_batch_interface()
+                
+                # Conectar eventos de batch
+                batch_events['load_btn'].click(
+                    fn=batch_events['on_model_load'],
+                    inputs=[batch_events['model_dropdown']],
+                    outputs=[batch_events['model_info'], batch_events['selected_model_state'], batch_events['process_btn']]
+                )
+                
+                batch_events['image_upload'].upload(
+                    fn=batch_events['on_images_upload'],
+                    inputs=[batch_events['image_upload']],
+                    outputs=[batch_events['images_info'], batch_events['images_state'], batch_events['process_btn']]
+                )
+                
+                # Procesar imágenes
+                process_event = batch_events['process_btn'].click(
+                    fn=batch_events['process_batch_images'],
+                    inputs=[
+                        batch_events['selected_model_state'],
+                        batch_events['images_state'],
+                        batch_events['points_per_side'],
+                        batch_events['pred_iou_thresh'],
+                        batch_events['stability_score_thresh']
+                    ],
+                    outputs=[batch_events['status'], batch_events['processing_results_state'], batch_events['results_html']]
+                )
+                
+                # Actualizar visualización de resultados cuando cambie el estado
+                batch_events['processing_results_state'].change(
+                    fn=batch_events['update_results_display'],
+                    inputs=[batch_events['processing_results_state']],
+                    outputs=[batch_events['results_html']]
+                )
+    
+    return demo
+
+
+def create_single_segmentation_interface():
+    """
+    Crea la interfaz de segmentación individual.
+    
+    Returns:
+        gr.Column: Contenedor con la interfaz de segmentación individual
+    """
+    with gr.Column() as single_interface:
+        
         # Estados para almacenar datos entre llamadas
         masks_state = gr.State(value=None)
         image_np_state = gr.State(value=None)
@@ -221,14 +285,6 @@ def create_interface():
         point_coords_state = gr.State(value=[])  # Guardar coordenadas de puntos
         point_labels_state = gr.State(value=[])  # Guardar etiquetas de puntos
         original_image_state = gr.State(value=None)  # Guardar imagen original sin puntos
-        
-        # Título
-        gr.Markdown(
-            """
-            # 🔬 GIA - Segmentación Automática de Imágenes
-            ### Segment Anything Model 2.1 - Meta AI
-            """
-        )
         
         # Selector de modelo
         with gr.Row():
@@ -302,12 +358,18 @@ def create_interface():
                     interactive=True
                 )
                 
-                # Botón para limpiar puntos
-                clear_points_btn = gr.Button(
-                    "🗑️ Limpiar Puntos",
-                    variant="secondary",
-                    size="sm"
-                )
+                # Botones para gestionar puntos
+                with gr.Row():
+                    undo_point_btn = gr.Button(
+                        "↩️ Deshacer Último Punto",
+                        variant="secondary",
+                        size="sm"
+                    )
+                    clear_points_btn = gr.Button(
+                        "🗑️ Limpiar Puntos",
+                        variant="secondary",
+                        size="sm"
+                    )
                 
                 segment_btn = gr.Button(
                     "🎯 SEGMENTAR",
@@ -370,13 +432,6 @@ def create_interface():
         # EVENTOS
         # ====================================================================
         
-        # Cargar modelo
-        load_btn.click(
-            fn=load_model,
-            inputs=[model_dropdown],
-            outputs=[model_info]
-        )
-        
         # Función para guardar imagen original cuando se sube
         def save_original_image(image):
             """Guarda la imagen original cuando se sube"""
@@ -426,6 +481,45 @@ def create_interface():
             # Devolver: imagen con puntos para mostrar, nuevas coordenadas, nuevas labels, y la imagen ORIGINAL sin modificar
             return img_with_points, new_coords, new_labels, original_image
         
+        # Función para deshacer el último punto
+        def undo_last_point(original_image, current_coords, current_labels):
+            """Elimina el último punto agregado"""
+            if original_image is None:
+                return original_image, current_coords, current_labels, original_image
+            
+            # Asegurarse de que current_coords y current_labels sean listas
+            if current_coords is None:
+                current_coords = []
+            if current_labels is None:
+                current_labels = []
+            
+            # Si no hay puntos, no hacer nada
+            if len(current_coords) == 0 or len(current_labels) == 0:
+                return original_image, current_coords, current_labels, original_image
+            
+            # Eliminar el último punto de ambas listas
+            new_coords = current_coords[:-1]
+            new_labels = current_labels[:-1]
+            
+            # Dibujar puntos sobre una COPIA de la imagen original
+            from PIL import ImageDraw
+            img_with_points = original_image.copy()
+            draw = ImageDraw.Draw(img_with_points)
+            
+            # Dibujar todos los puntos restantes
+            for coord, lbl in zip(new_coords, new_labels):
+                color = "green" if lbl == 1 else "red"
+                # Dibujar círculo
+                draw.ellipse(
+                    [coord[0] - 8, coord[1] - 8, coord[0] + 8, coord[1] + 8],
+                    fill=color,
+                    outline="white",
+                    width=2
+                )
+            
+            # Devolver: imagen con puntos actualizados, nuevas coordenadas, nuevas labels, y la imagen ORIGINAL sin modificar
+            return img_with_points, new_coords, new_labels, original_image
+        
         # Función para limpiar puntos
         def clear_points(original_image, current_coords, current_labels):
             """Limpia todos los puntos seleccionados"""
@@ -459,6 +553,16 @@ def create_interface():
                 )
             
             return img_with_points
+        
+        # Función para actualizar imagen cuando se carga un modelo
+        def on_model_load(model_name, original_image, point_coords, point_labels):
+            """Se ejecuta cuando se carga un modelo - actualiza la imagen con los puntos actuales"""
+            status = load_model(model_name)
+            # Actualizar la imagen de entrada para mostrar los puntos actuales
+            if original_image is not None:
+                updated_image = show_image_with_points(original_image, point_coords, point_labels)
+                return status, updated_image
+            return status, None
         
         # Segmentar imagen
         def segment_and_store(original_image, model_name, points_per_side, pred_iou_thresh, stability_score_thresh, point_coords, point_labels):
@@ -501,6 +605,13 @@ def create_interface():
                 return image, [], []  # original_image_state, point_coords_state, point_labels_state
             return None, [], []
         
+        # Cargar modelo (debe estar después de definir on_model_load)
+        load_btn.click(
+            fn=on_model_load,
+            inputs=[model_dropdown, original_image_state, point_coords_state, point_labels_state],
+            outputs=[model_info, input_image]
+        )
+        
         # Usar upload en lugar de change para que solo se ejecute cuando se sube una imagen nueva
         input_image.upload(
             fn=on_image_upload,
@@ -512,6 +623,13 @@ def create_interface():
         input_image.select(
             fn=handle_image_click,
             inputs=[original_image_state, point_type, point_coords_state, point_labels_state],
+            outputs=[input_image, point_coords_state, point_labels_state, original_image_state]
+        )
+        
+        # Evento para deshacer último punto
+        undo_point_btn.click(
+            fn=undo_last_point,
+            inputs=[original_image_state, point_coords_state, point_labels_state],
             outputs=[input_image, point_coords_state, point_labels_state, original_image_state]
         )
         
@@ -611,4 +729,4 @@ def create_interface():
             outputs=[export_file, status_text]
         )
     
-    return demo
+    return single_interface
